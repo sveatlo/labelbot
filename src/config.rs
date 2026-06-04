@@ -14,6 +14,14 @@ pub struct Config {
     pub anthropic_api_key: String,
     #[serde(default = "default_anthropic_model")]
     pub anthropic_model: String,
+    #[serde(default = "default_classifier_backend")]
+    pub classifier_backend: String,
+    #[serde(default = "default_openai_base_url")]
+    pub openai_base_url: String,
+    #[serde(default = "default_openai_api_key")]
+    pub openai_api_key: String,
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
     #[serde(default = "default_db_path")]
     pub db_path: String,
     #[serde(default = "default_tls_insecure")]
@@ -47,6 +55,18 @@ fn default_tls_insecure() -> bool {
 fn default_backfill_days() -> u64 {
     365
 }
+fn default_classifier_backend() -> String {
+    "anthropic".into()
+}
+fn default_openai_base_url() -> String {
+    "http://localhost:3000/api/v1".into()
+}
+fn default_openai_api_key() -> String {
+    String::new()
+}
+fn default_openai_model() -> String {
+    "llama3".into()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -57,6 +77,10 @@ impl Default for Config {
             imap_password: String::new(),
             anthropic_api_key: String::new(),
             anthropic_model: default_anthropic_model(),
+            classifier_backend: default_classifier_backend(),
+            openai_base_url: default_openai_base_url(),
+            openai_api_key: default_openai_api_key(),
+            openai_model: default_openai_model(),
             db_path: default_db_path(),
             tls_insecure: default_tls_insecure(),
             poll_idle_timeout_secs: default_poll_timeout(),
@@ -68,12 +92,11 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self, ConfigError> {
-        let config_path =
-            std::env::var("LABELBOT_CONFIG").unwrap_or_else(|_| "config.toml".into());
+        let config_path = std::env::var("LABELBOT_CONFIG").unwrap_or_else(|_| "config.toml".into());
 
         let figment = Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file(&config_path))
-            .merge(Env::raw().only(&["ANTHROPIC_API_KEY"]))
+            .merge(Env::raw().only(&["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]))
             .merge(Env::prefixed("APP_"));
 
         Config::from_figment(figment)
@@ -93,8 +116,15 @@ impl Config {
         if self.imap_password.is_empty() {
             return Err(ConfigError::Missing("imap_password"));
         }
-        if self.anthropic_api_key.is_empty() {
-            return Err(ConfigError::Missing("anthropic_api_key"));
+        match self.classifier_backend.as_str() {
+            "openai" => {
+                // openai_api_key is optional for local deployments
+            }
+            _ => {
+                if self.anthropic_api_key.is_empty() {
+                    return Err(ConfigError::Missing("anthropic_api_key"));
+                }
+            }
         }
         Ok(())
     }
