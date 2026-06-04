@@ -10,9 +10,21 @@ imap_port = 1143
 imap_user = "your-proton-email@proton.me"
 imap_password = "put-bridge-smtp-imap-password-here"
 
-# Anthropic API key (can also be set via ANTHROPIC_API_KEY env var)
+# ── Classifier Backend ─────────────────────────────────────────────
+# Which LLM backend to use: "anthropic" (default) or "openai"
+# classifer_backend = "anthropic"
+
+# Anthropic settings (used when classifier_backend = "anthropic")
+# anthropic_api_key can also be set via ANTHROPIC_API_KEY env var
 anthropic_api_key = "sk-ant-..."
 anthropic_model = "claude-haiku-4-5"
+
+# OpenAI-compatible settings (used when classifier_backend = "openai")
+# Point at any OpenAI-compatible API (Open WebUI, Ollama, LiteLLM, etc.)
+# openai_api_key can also be set via OPENAI_API_KEY env var
+# openai_base_url = "http://192.168.1.100:3000/api/v1"
+# openai_api_key = "sk-..."        # may be optional for local deployments
+# openai_model = "llama3"
 
 # ── Optional overrides (shown with defaults) ──────────────────────
 
