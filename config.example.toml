@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────
+# labelbot configuration
+# ─────────────────────────────────────────────────────────────────────
+# Copy this file to config.toml, fill in your credentials, and run:
+#   docker compose up -d
+
+# IMAP connection — expects Proton Mail Bridge on localhost:1143
+imap_host = "127.0.0.1"
+imap_port = 1143
+imap_user = "your-proton-email@proton.me"
+imap_password = "put-bridge-smtp-imap-password-here"
+
+# Anthropic API key (can also be set via ANTHROPIC_API_KEY env var)
+anthropic_api_key = "sk-ant-..."
+anthropic_model = "claude-haiku-4-5"
+
+# ── Optional overrides (shown with defaults) ──────────────────────
+
+# Accept invalid TLS certificates. Default: false. Set to true for Proton Bridge
+# (which uses a self-signed cert on localhost). Do NOT enable for remote IMAP servers.
+tls_insecure = true
+
+# Path to SQLite database (for deduplication tracking)
+# db_path = "/app/db/processed.db"
+
+# Max age in days for one-time backfill of existing messages (0 = no backfill)
+# backfill_max_age_days = 365
+
+# IMAP IDLE poll timeout in seconds before re-sending IDLE
+# poll_idle_timeout_secs = 300
+
+# ── Labels ────────────────────────────────────────────────────────
+# Define the set of labels the classifier can pick from. If omitted, the
+# historical defaults are used:
+#   Work, Finance, Newsletters, Receipts, Personal, Travel, Shopping,
+#   Notifications, House, Family
+#
+# Mark a label `important = true` to automatically also apply the
+# "Important" label to any email tagged with it.
+#
+# [labels.Newsletter]
+# [labels.House]
+# important = true
