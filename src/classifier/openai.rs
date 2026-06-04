@@ -223,3 +223,242 @@ fn backoff_duration(attempt: u32) -> Duration {
     let jitter: u64 = rand::thread_rng().gen_range(0..=base_secs);
     Duration::from_secs(base_secs + jitter)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn default_labels() -> Vec<String> {
+        ["Work", "Finance", "Personal", "House"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect()
+    }
+
+    fn make_classifier(server: &MockServer) -> OpenAiClassifier {
+        OpenAiClassifier::new(
+            server.uri(),
+            "test-key".into(),
+            "gpt-4o-mini".into(),
+            default_labels(),
+        )
+    }
+
+    fn function_call_response(labels: &[&str]) -> Value {
+        let labels_val: Vec<Value> = labels
+            .iter()
+            .map(|l| Value::String((*l).to_owned()))
+            .collect();
+        let args = serde_json::json!({ "labels": labels_val }).to_string();
+        serde_json::json!({
+            "id": "chatcmpl_123",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "type": "function",
+                                "function": {
+                                    "name": "classify_email",
+                                    "arguments": args
+                                }
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 10,
+                "total_tokens": 60
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn classify_returns_labels() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(function_call_response(&["Work", "Finance"])),
+            )
+            .mount(&server)
+            .await;
+
+        let classifier = make_classifier(&server);
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let labels = execute(
+            &classifier.client,
+            &server.uri(),
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(labels, vec!["Work".to_owned(), "Finance".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn classify_returns_empty_labels() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(function_call_response(&[])))
+            .mount(&server)
+            .await;
+
+        let classifier = make_classifier(&server);
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let labels = execute(
+            &classifier.client,
+            &server.uri(),
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await
+        .unwrap();
+        assert!(labels.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_error_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .mount(&server)
+            .await;
+
+        let classifier = make_classifier(&server);
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let err = execute(
+            &classifier.client,
+            &server.uri(),
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ClassifyError::Api { status: 400, .. }));
+    }
+
+    #[tokio::test]
+    async fn parse_function_call_extracts_labels() {
+        let value = function_call_response(&["Work", "Personal"]);
+        let labels = parse_response(&value, &default_labels()).unwrap();
+        assert_eq!(labels, vec!["Work".to_owned(), "Personal".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn parse_empty_labels() {
+        let value = function_call_response(&[]);
+        let labels = parse_response(&value, &default_labels()).unwrap();
+        assert!(labels.is_empty());
+    }
+
+    #[test]
+    fn parse_invalid_response_missing_choices() {
+        let value = serde_json::json!({"id": "chatcmpl_1"});
+        let err = parse_response(&value, &default_labels()).unwrap_err();
+        assert!(matches!(err, ClassifyError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_label() {
+        let value = function_call_response(&["Spam"]);
+        let err = parse_response(&value, &default_labels()).unwrap_err();
+        assert!(matches!(err, ClassifyError::Parse(_)));
+    }
+
+    #[tokio::test]
+    async fn rate_limited_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&server)
+            .await;
+
+        let classifier = make_classifier(&server);
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let err = execute(
+            &classifier.client,
+            &server.uri(),
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ClassifyError::RateLimited { .. }));
+    }
+
+    #[tokio::test]
+    async fn server_error_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .mount(&server)
+            .await;
+
+        let classifier = make_classifier(&server);
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let err = execute(
+            &classifier.client,
+            &server.uri(),
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ClassifyError::Api { status: 500, .. }));
+    }
+
+    #[tokio::test]
+    async fn uses_correct_url_path() {
+        let server = MockServer::start().await;
+
+        // The URI from wiremock is http://127.0.0.1:PORT, without a path.
+        // execute() appends /chat/completions, so our mock must match that.
+        let base_url = format!("{}/v1", server.uri());
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(function_call_response(&[])))
+            .mount(&server)
+            .await;
+
+        let classifier = OpenAiClassifier::new(
+            base_url.clone(),
+            "test-key".into(),
+            "gpt-4o-mini".into(),
+            default_labels(),
+        );
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let result = execute(
+            &classifier.client,
+            &base_url,
+            "test-key",
+            &body,
+            &default_labels(),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+}
