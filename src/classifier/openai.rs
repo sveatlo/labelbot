@@ -165,11 +165,34 @@ fn parse_response(value: &Value, known_labels: &[String]) -> Result<Vec<String>,
         .get("message")
         .ok_or_else(|| ClassifyError::Parse("choice missing message".into()))?;
 
-    let tool_calls = message
-        .get("tool_calls")
-        .and_then(|t| t.as_array())
-        .ok_or_else(|| ClassifyError::Parse("message missing tool_calls array".into()))?;
+    // Try tool_calls first (native function calling)
+    if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
+        return parse_tool_calls(tool_calls, known_labels);
+    }
 
+    // Fallback: parse content text as JSON (for models that don't support native tool calls)
+    #[expect(clippy::collapsible_if)]
+    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(content)
+            && let Some(labels) = parsed.get("labels").and_then(|l| l.as_array())
+        {
+            return labels
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| canonicalize(s, known_labels))
+                .collect();
+        }
+    }
+
+    Err(ClassifyError::Parse(
+        "response has no tool_calls and content did not contain valid JSON labels".into(),
+    ))
+}
+
+fn parse_tool_calls(
+    tool_calls: &[Value],
+    known_labels: &[String],
+) -> Result<Vec<String>, ClassifyError> {
     let first_call = tool_calls
         .first()
         .ok_or_else(|| ClassifyError::Parse("empty tool_calls array".into()))?;
@@ -178,12 +201,9 @@ fn parse_response(value: &Value, known_labels: &[String]) -> Result<Vec<String>,
         .get("function")
         .ok_or_else(|| ClassifyError::Parse("tool_call missing function".into()))?;
 
-    let name = function
-        .get("name")
-        .and_then(|n| n.as_str())
-        .ok_or_else(|| ClassifyError::Parse("function missing name".into()))?;
-
-    if name != "classify_email" {
+    if let Some(name) = function.get("name").and_then(|n| n.as_str())
+        && name != "classify_email"
+    {
         return Err(ClassifyError::Parse(format!(
             "unexpected function name: {name}"
         )));
@@ -381,6 +401,73 @@ mod tests {
     #[test]
     fn parse_rejects_unknown_label() {
         let value = function_call_response(&["Spam"]);
+        let err = parse_response(&value, &default_labels()).unwrap_err();
+        assert!(matches!(err, ClassifyError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_json_content_fallback() {
+        // Some models (e.g., llama3.2:1b) return JSON in content text instead of tool_calls
+        let value = serde_json::json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "llama3.2:1b",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "{\"labels\": [\"Work\", \"Finance\"]}"
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+        let labels = parse_response(&value, &default_labels()).unwrap();
+        assert_eq!(labels, vec!["Work".to_owned(), "Finance".to_owned()]);
+    }
+
+    #[test]
+    fn parse_json_content_empty_labels() {
+        let value = serde_json::json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "llama3.2:1b",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "{\"labels\": []}"
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+        let labels = parse_response(&value, &default_labels()).unwrap();
+        assert!(labels.is_empty());
+    }
+
+    #[test]
+    fn parse_json_content_not_json_falls_through() {
+        let value = serde_json::json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "llama3.2:1b",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "I don't know how to classify this"
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
         let err = parse_response(&value, &default_labels()).unwrap_err();
         assert!(matches!(err, ClassifyError::Parse(_)));
     }

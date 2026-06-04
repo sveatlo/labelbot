@@ -26,7 +26,7 @@ pub enum ClassifyError {
     #[error("http request failed: {0}")]
     Http(#[from] reqwest::Error),
 
-    #[error("anthropic api returned status {status}: {body}")]
+    #[error("api returned status {status}: {body}")]
     Api { status: u16, body: String },
 
     #[error("could not parse classifier response: {0}")]
