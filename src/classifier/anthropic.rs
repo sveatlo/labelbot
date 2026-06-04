@@ -2,6 +2,8 @@ use crate::classifier::LlmClassifier;
 use crate::error::ClassifyError;
 use rand::Rng;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -56,15 +58,15 @@ impl AnthropicClassifier {
 }
 
 impl LlmClassifier for AnthropicClassifier {
-    fn classify(
-        &self,
-        subject: &str,
-        from_addr: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<String>, ClassifyError>> + Send {
+    fn classify<'a>(
+        &'a self,
+        subject: &'a str,
+        from_addr: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ClassifyError>> + Send + 'a>> {
         let body = build_request_body(&self.model, subject, from_addr, &self.labels);
         let known: Vec<String> = self.labels.clone();
 
-        async move {
+        Box::pin(async move {
             for attempt in 1..=MAX_RETRIES {
                 match self.execute(&body, &known).await {
                     Ok(labels) => return Ok(labels),
@@ -80,8 +82,10 @@ impl LlmClassifier for AnthropicClassifier {
                 }
             }
 
-            Err(ClassifyError::RateLimited { attempts: MAX_RETRIES })
-        }
+            Err(ClassifyError::RateLimited {
+                attempts: MAX_RETRIES,
+            })
+        })
     }
 }
 
@@ -307,7 +311,10 @@ mod tests {
 
         let classifier = make_classifier(&server);
         let body = build_request_body("haiku", "test", "from@x.com", &default_labels());
-        let err = classifier.execute(&body, &default_labels()).await.unwrap_err();
+        let err = classifier
+            .execute(&body, &default_labels())
+            .await
+            .unwrap_err();
         assert!(matches!(err, ClassifyError::Api { status: 400, .. }));
     }
 

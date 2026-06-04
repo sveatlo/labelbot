@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::classifier::LlmClassifier;
 use crate::config::Config;
@@ -9,7 +9,7 @@ use crate::imap::idle;
 use crate::labels::{IMPORTANT_LABEL, LabelSet};
 use crate::store::Store;
 
-pub async fn run(cfg: Config, classifier: impl LlmClassifier) -> anyhow::Result<()> {
+pub async fn run(cfg: Config, classifier: Box<dyn LlmClassifier>) -> anyhow::Result<()> {
     let store = Store::connect(&cfg.db_path).await?;
     tracing::info!(db_path = %cfg.db_path, "connected to store");
     let labels = cfg.label_set();
@@ -18,14 +18,12 @@ pub async fn run(cfg: Config, classifier: impl LlmClassifier) -> anyhow::Result<
     {
         let shutdown = shutdown.clone();
         tokio::spawn(async move {
-            let mut sigterm = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            )
-            .expect("register SIGTERM handler");
-            let mut sigint = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::interrupt(),
-            )
-            .expect("register SIGINT handler");
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("register SIGTERM handler");
+            let mut sigint =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                    .expect("register SIGINT handler");
 
             tokio::select! {
                 _ = sigterm.recv() => tracing::info!("received SIGTERM"),
@@ -42,7 +40,7 @@ pub async fn run(cfg: Config, classifier: impl LlmClassifier) -> anyhow::Result<
             return Ok(());
         }
 
-        match run_session(&cfg, &labels, &classifier, &store, &shutdown).await {
+        match run_session(&cfg, &labels, classifier.as_ref(), &store, &shutdown).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 if shutdown.load(Ordering::Relaxed) {
@@ -62,7 +60,7 @@ pub async fn run(cfg: Config, classifier: impl LlmClassifier) -> anyhow::Result<
 async fn run_session(
     cfg: &Config,
     labels: &LabelSet,
-    classifier: &impl LlmClassifier,
+    classifier: &dyn LlmClassifier,
     store: &Store,
     shutdown: &Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
@@ -85,7 +83,14 @@ async fn run_session(
     tracing::info!("selected INBOX");
 
     if cfg.backfill_max_age_days > 0 {
-        backfill(&mut session, store, classifier, labels, cfg.backfill_max_age_days).await?;
+        backfill(
+            &mut session,
+            store,
+            classifier,
+            labels,
+            cfg.backfill_max_age_days,
+        )
+        .await?;
         if shutdown.load(Ordering::Relaxed) {
             tracing::info!("shutdown after backfill");
             return Ok(());
@@ -147,7 +152,7 @@ async fn run_session(
 async fn backfill(
     session: &mut imap::ImapSession,
     store: &Store,
-    classifier: &impl LlmClassifier,
+    classifier: &dyn LlmClassifier,
     labels: &LabelSet,
     max_age_days: u64,
 ) -> anyhow::Result<()> {
@@ -193,7 +198,9 @@ async fn backfill(
                 continue;
             }
 
-            if let Err(e) = classify_and_record(classifier, session, store, labels, *uid, headers).await {
+            if let Err(e) =
+                classify_and_record(classifier, session, store, labels, *uid, headers).await
+            {
                 tracing::error!(%uid, msg_id=%headers.message_id, error=%e, "backfill classify_and_record failed, continuing");
             }
         }
@@ -208,7 +215,7 @@ async fn backfill(
 /// Classify an email via the LLM, apply labels to IMAP mailbox, and record in the
 /// deduplication store. Non-fatal store errors are logged but not propagated.
 async fn classify_and_record(
-    classifier: &impl LlmClassifier,
+    classifier: &dyn LlmClassifier,
     session: &mut imap::ImapSession,
     store: &Store,
     label_set: &LabelSet,

@@ -2,6 +2,8 @@ use crate::classifier::LlmClassifier;
 use crate::error::ClassifyError;
 use rand::Rng;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 const MAX_RETRIES: u32 = 5;
@@ -33,18 +35,18 @@ impl OpenAiClassifier {
 }
 
 impl LlmClassifier for OpenAiClassifier {
-    fn classify(
-        &self,
-        subject: &str,
-        from_addr: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<String>, ClassifyError>> + Send {
+    fn classify<'a>(
+        &'a self,
+        subject: &'a str,
+        from_addr: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ClassifyError>> + Send + 'a>> {
         let body = build_request_body(&self.model, subject, from_addr, &self.labels);
         let known: Vec<String> = self.labels.clone();
         let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let client = self.client.clone();
 
-        async move {
+        Box::pin(async move {
             for attempt in 1..=MAX_RETRIES {
                 match execute(&client, &base_url, &api_key, &body, &known).await {
                     Ok(labels) => return Ok(labels),
@@ -63,7 +65,7 @@ impl LlmClassifier for OpenAiClassifier {
             Err(ClassifyError::RateLimited {
                 attempts: MAX_RETRIES,
             })
-        }
+        })
     }
 }
 
