@@ -1,26 +1,34 @@
 use crate::error::ImapError;
-use crate::imap::{fetch, ImapSession};
+use crate::imap::{ImapSession, fetch};
 use async_imap::extensions::idle::IdleResponse;
 use futures::StreamExt;
 use std::fmt;
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 pub async fn enter_idle(
     session: ImapSession,
     timeout_secs: u64,
+    shutdown: Arc<Notify>,
 ) -> Result<IdleLoop, ImapError> {
     let mut idle = session.idle();
     idle.init().await?;
     Ok(IdleLoop {
         idle: Some(idle),
         timeout: std::time::Duration::from_secs(timeout_secs),
+        shutdown,
     })
 }
 
 pub struct IdleLoop {
-    idle: Option<async_imap::extensions::idle::Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>>,
+    idle: Option<
+        async_imap::extensions::idle::Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+    >,
     timeout: std::time::Duration,
+    shutdown: Arc<Notify>,
 }
 
+#[expect(clippy::missing_fields_in_debug)]
 impl fmt::Debug for IdleLoop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IdleLoop")
@@ -33,20 +41,25 @@ impl fmt::Debug for IdleLoop {
 impl IdleLoop {
     /// Wait for the server to send new-data notification (or timeout).
     /// Returns `Some(session)` if we need to process new mail (NewData received),
-    /// or `None` if we timed out (caller should re-IDLE).
-    pub async fn wait_for_notification(
-        &mut self,
-    ) -> Result<Option<ImapSession>, ImapError> {
+    /// or `None` if we timed out or shutdown was requested (caller should check shutdown flag).
+    pub async fn wait_for_notification(&mut self) -> Result<Option<ImapSession>, ImapError> {
         let mut idle = self.idle.take().expect("idle handle already consumed");
 
-        let (fut, _interrupt) = idle.wait_with_timeout(self.timeout);
-        match fut.await? {
-            IdleResponse::NewData(_) => {
-                let session = IdleLoop::complete(idle).await?;
-                Ok(Some(session))
+        let idle_response = {
+            let (fut, _interrupt) = idle.wait_with_timeout(self.timeout);
+            tokio::pin!(fut);
+            tokio::select! {
+                result = &mut fut => Some(result?),
+                () = self.shutdown.notified() => None,
             }
-            IdleResponse::Timeout | IdleResponse::ManualInterrupt => {
-                let session = IdleLoop::complete(idle).await?;
+        };
+
+        let session = IdleLoop::complete(idle).await?;
+
+        match idle_response {
+            None => Ok(None),
+            Some(IdleResponse::NewData(_)) => Ok(Some(session)),
+            Some(IdleResponse::Timeout | IdleResponse::ManualInterrupt) => {
                 self.idle = Some(session.idle());
                 self.idle.as_mut().unwrap().init().await?;
                 Ok(None)
@@ -61,7 +74,6 @@ impl IdleLoop {
     ) -> Result<ImapSession, ImapError> {
         Ok(idle.done().await?)
     }
-
 }
 
 /// Fetch headers of all messages matching the given IMAP search query (e.g. `UNSEEN`).
@@ -86,10 +98,11 @@ pub async fn fetch_new_headers(
     while let Some(fetch) = stream.next().await {
         let f = fetch?;
         if let Some(header_bytes) = f.header()
-            && let Some(uid) = f.uid {
-                let headers = fetch::parse_header_bytes(header_bytes);
-                results.push((uid, headers));
-            }
+            && let Some(uid) = f.uid
+        {
+            let headers = fetch::parse_header_bytes(header_bytes);
+            results.push((uid, headers));
+        }
     }
 
     Ok(results)

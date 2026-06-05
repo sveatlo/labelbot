@@ -1,37 +1,53 @@
 use crate::error::ConfigError;
 use crate::labels::{LabelConfig, LabelSet};
 use figment::Figment;
-use figment::providers::{Env, Format, Serialized, Toml};
+use figment::providers::{Env, Format, Toml};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub imap_host: String,
-    pub imap_port: u16,
-    pub imap_user: String,
-    pub imap_password: String,
-    pub anthropic_api_key: String,
-    #[serde(default = "default_anthropic_model")]
-    pub anthropic_model: String,
-    #[serde(default = "default_classifier_backend")]
-    pub classifier_backend: String,
-    #[serde(default = "default_openai_base_url")]
-    pub openai_base_url: String,
-    #[serde(default = "default_openai_api_key")]
-    pub openai_api_key: String,
-    #[serde(default = "default_openai_model")]
-    pub openai_model: String,
+    pub imap: ImapConfig,
+    pub classifier: ClassifierConfig,
+
     #[serde(default = "default_db_path")]
     pub db_path: String,
-    #[serde(default = "default_tls_insecure")]
-    pub tls_insecure: bool,
+
     #[serde(default = "default_poll_timeout")]
     pub poll_idle_timeout_secs: u64,
     #[serde(default = "default_backfill_days")]
     pub backfill_max_age_days: u64,
     #[serde(default = "LabelSet::default_config")]
-    pub labels: HashMap<String, LabelConfig>,
+    labels: HashMap<String, LabelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImapConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
+    #[serde(default = "default_tls_insecure")]
+    pub tls_insecure: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "classifier_backend")]
+pub enum ClassifierConfig {
+    Anthropic {
+        api_key: String,
+        #[serde(default = "default_anthropic_model")]
+        model: String,
+    },
+    OpenAI {
+        api_key: String,
+        #[serde(default = "default_openai_base_url")]
+        base_url: Url,
+        #[serde(default = "default_openai_model")]
+        model: String,
+    },
 }
 
 impl Config {
@@ -53,16 +69,12 @@ fn default_tls_insecure() -> bool {
     false
 }
 fn default_backfill_days() -> u64 {
-    365
+    0
 }
-fn default_classifier_backend() -> String {
-    "anthropic".into()
-}
-fn default_openai_base_url() -> String {
-    "http://localhost:3000/api/v1".into()
-}
-fn default_openai_api_key() -> String {
-    String::new()
+fn default_openai_base_url() -> Url {
+    "https://api.openai.com/v1/"
+        .parse()
+        .expect("BUG: invalid hardcoded OpenAI URL")
 }
 fn default_openai_model() -> String {
     "llama3".into()
@@ -71,18 +83,18 @@ fn default_openai_model() -> String {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            imap_host: "host.docker.internal".into(),
-            imap_port: 1143,
-            imap_user: String::new(),
-            imap_password: String::new(),
-            anthropic_api_key: String::new(),
-            anthropic_model: default_anthropic_model(),
-            classifier_backend: default_classifier_backend(),
-            openai_base_url: default_openai_base_url(),
-            openai_api_key: default_openai_api_key(),
-            openai_model: default_openai_model(),
+            imap: ImapConfig {
+                host: "host.docker.internal".into(),
+                port: 1143,
+                user: String::new(),
+                password: String::new(),
+                tls_insecure: default_tls_insecure(),
+            },
+            classifier: ClassifierConfig::Anthropic {
+                api_key: String::new(),
+                model: default_anthropic_model(),
+            },
             db_path: default_db_path(),
-            tls_insecure: default_tls_insecure(),
             poll_idle_timeout_secs: default_poll_timeout(),
             backfill_max_age_days: default_backfill_days(),
             labels: LabelSet::default_config(),
@@ -91,13 +103,14 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Self, ConfigError> {
-        let config_path = std::env::var("LABELBOT_CONFIG").unwrap_or_else(|_| "config.toml".into());
+    pub fn load(config_file: Option<PathBuf>) -> Result<Self, ConfigError> {
+        let mut figment = Figment::new();
 
-        let figment = Figment::from(Serialized::defaults(Config::default()))
-            .merge(Toml::file(&config_path))
-            .merge(Env::raw().only(&["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]))
-            .merge(Env::prefixed("APP_"));
+        if let Some(config_file) = config_file {
+            figment = figment.merge(Toml::file(config_file));
+        }
+
+        figment = figment.merge(Env::prefixed("LABELBOT_").split("__"));
 
         Config::from_figment(figment)
     }
@@ -110,19 +123,19 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.imap_user.is_empty() {
-            return Err(ConfigError::Missing("imap_user"));
+        if self.imap.user.is_empty() {
+            return Err(ConfigError::Missing("imap.user"));
         }
-        if self.imap_password.is_empty() {
-            return Err(ConfigError::Missing("imap_password"));
+        if self.imap.password.is_empty() {
+            return Err(ConfigError::Missing("imap.password"));
         }
-        match self.classifier_backend.as_str() {
-            "openai" => {
-                // openai_api_key is optional for local deployments
+        match &self.classifier {
+            ClassifierConfig::OpenAI { .. } => {
+                // api_key is optional for local deployments
             }
-            _ => {
-                if self.anthropic_api_key.is_empty() {
-                    return Err(ConfigError::Missing("anthropic_api_key"));
+            ClassifierConfig::Anthropic { api_key, .. } => {
+                if api_key.is_empty() {
+                    return Err(ConfigError::Missing("classifier.api_key"));
                 }
             }
         }
@@ -133,6 +146,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use figment::providers::Serialized;
     use figment::providers::Toml as TomlProv;
 
     fn provider_figment() -> Figment {
@@ -142,38 +156,40 @@ mod tests {
     #[test]
     fn defaults_apply_when_only_required_provided() {
         let f = provider_figment().merge(TomlProv::string(
-            "imap_user='u'\nimap_password='p'\nanthropic_api_key='k'",
+            "[imap]\nuser='u'\npassword='p'\n[classifier]\nclassifier_backend='Anthropic'\napi_key='k'",
         ));
         let cfg = Config::from_figment(f).unwrap();
-        assert_eq!(cfg.imap_port, 1143);
-        assert_eq!(cfg.anthropic_model, "claude-haiku-4-5");
+        assert_eq!(cfg.imap.port, 1143);
         assert_eq!(cfg.poll_idle_timeout_secs, 300);
         assert_eq!(cfg.db_path, "./local.db");
+        assert!(matches!(
+            &cfg.classifier,
+            ClassifierConfig::Anthropic { model, .. } if model == "claude-haiku-4-5"
+        ));
     }
 
     #[test]
     fn toml_overrides_defaults() {
-        let f = provider_figment()
-            .merge(TomlProv::string(
-                "imap_host='mail.local'\nimap_port=1993\nimap_user='u'\nimap_password='p'\nanthropic_api_key='k'",
-            ));
+        let f = provider_figment().merge(TomlProv::string(
+            "[imap]\nhost='mail.local'\nport=1993\nuser='u'\npassword='p'\n[classifier]\nclassifier_backend='Anthropic'\napi_key='k'",
+        ));
         let cfg = Config::from_figment(f).unwrap();
-        assert_eq!(cfg.imap_host, "mail.local");
-        assert_eq!(cfg.imap_port, 1993);
+        assert_eq!(cfg.imap.host, "mail.local");
+        assert_eq!(cfg.imap.port, 1993);
     }
 
     #[test]
     fn missing_required_field_errors() {
         let f = provider_figment().merge(TomlProv::string(
-            "imap_user=''\nimap_password='p'\nanthropic_api_key='k'",
+            "[imap]\nuser=''\npassword='p'\n[classifier]\nclassifier_backend='Anthropic'\napi_key='k'",
         ));
         let err = Config::from_figment(f).unwrap_err();
-        assert!(matches!(&err, ConfigError::Missing(f) if *f == "imap_user"));
+        assert!(matches!(&err, ConfigError::Missing(f) if *f == "imap.user"));
 
         let f = provider_figment().merge(TomlProv::string(
-            "anthropic_api_key=''\nimap_user='u'\nimap_password='p'",
+            "[imap]\nuser='u'\npassword='p'\n[classifier]\nclassifier_backend='Anthropic'\napi_key=''",
         ));
         let err = Config::from_figment(f).unwrap_err();
-        assert!(matches!(&err, ConfigError::Missing(f) if *f == "anthropic_api_key"));
+        assert!(matches!(&err, ConfigError::Missing(f) if *f == "classifier.api_key"));
     }
 }

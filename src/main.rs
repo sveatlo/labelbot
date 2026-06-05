@@ -1,4 +1,5 @@
 use anyhow::Context;
+use clap::Parser;
 use labelbot::classifier::LlmClassifier;
 use tracing_subscriber::EnvFilter;
 
@@ -13,28 +14,37 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("labelbot starting");
 
-    let cfg = labelbot::config::Config::load()?;
+    let cli = labelbot::cli::Cli::parse();
+
+    let cfg = labelbot::config::Config::load(cli.config)?;
     tracing::info!(
-        imap_host = %cfg.imap_host,
-        imap_port = %cfg.imap_port,
-        classifier_backend = %cfg.classifier_backend,
+        imap_host = %cfg.imap.host,
+        imap_port = %cfg.imap.port,
+        backfill_days = %cfg.backfill_max_age_days,
+        labels = ?cfg.label_set().names(),
         "config loaded",
     );
 
     let label_names: Vec<String> = cfg.label_set().names().to_vec();
 
-    let classifier: Box<dyn LlmClassifier> = match cfg.classifier_backend.as_str() {
-        "openai" => Box::new(labelbot::classifier::openai::OpenAiClassifier::new(
-            cfg.openai_base_url.clone(),
-            cfg.openai_api_key.clone(),
-            cfg.openai_model.clone(),
+    let classifier: Box<dyn LlmClassifier> = match &cfg.classifier {
+        labelbot::config::ClassifierConfig::OpenAI {
+            api_key,
+            base_url,
+            model,
+        } => Box::new(labelbot::classifier::openai::OpenAiClassifier::new(
+            base_url.to_string(),
+            api_key.clone(),
+            model.clone(),
             label_names,
         )),
-        _ => Box::new(labelbot::classifier::anthropic::AnthropicClassifier::new(
-            cfg.anthropic_api_key.clone(),
-            cfg.anthropic_model.clone(),
-            label_names,
-        )),
+        labelbot::config::ClassifierConfig::Anthropic { api_key, model } => {
+            Box::new(labelbot::classifier::anthropic::AnthropicClassifier::new(
+                api_key.clone(),
+                model.clone(),
+                label_names,
+            ))
+        }
     };
 
     labelbot::daemon::run(cfg, classifier)

@@ -1,6 +1,6 @@
 use crate::classifier::LlmClassifier;
 use crate::error::ClassifyError;
-use rand::Rng;
+use rand::RngExt;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -118,7 +118,7 @@ impl AnthropicClassifier {
         }
 
         let value: Value = resp.json().await?;
-        parse_tool_use_response(value, known_labels)
+        parse_tool_use_response(&value, known_labels)
     }
 }
 
@@ -168,7 +168,7 @@ fn build_request_body(model: &str, subject: &str, from_addr: &str, labels: &[Str
 }
 
 fn parse_tool_use_response(
-    value: Value,
+    value: &Value,
     known_labels: &[String],
 ) -> Result<Vec<String>, ClassifyError> {
     let content = value
@@ -214,7 +214,7 @@ fn canonicalize(s: &str, known: &[String]) -> Result<String, ClassifyError> {
 fn backoff_duration(attempt: u32) -> Duration {
     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, ... plus jitter up to 100%
     let base_secs = 2_u64.pow(attempt.saturating_sub(1));
-    let jitter: u64 = rand::thread_rng().gen_range(0..=base_secs);
+    let jitter: u64 = rand::rng().random_range(0..=base_secs);
     Duration::from_secs(base_secs + jitter)
 }
 
@@ -321,28 +321,28 @@ mod tests {
     #[tokio::test]
     async fn parse_tool_use_extracts_labels() {
         let value = tool_use_response(&["Work", "Personal"]);
-        let labels = parse_tool_use_response(value, &default_labels()).unwrap();
+        let labels = parse_tool_use_response(&value, &default_labels()).unwrap();
         assert_eq!(labels, vec!["Work".to_owned(), "Personal".to_owned()]);
     }
 
     #[tokio::test]
     async fn parse_empty_labels() {
         let value = tool_use_response(&[]);
-        let labels = parse_tool_use_response(value, &default_labels()).unwrap();
+        let labels = parse_tool_use_response(&value, &default_labels()).unwrap();
         assert!(labels.is_empty());
     }
 
     #[test]
     fn parse_invalid_response_missing_content() {
         let value = serde_json::json!({"id": "msg_1"});
-        let err = parse_tool_use_response(value, &default_labels()).unwrap_err();
+        let err = parse_tool_use_response(&value, &default_labels()).unwrap_err();
         assert!(matches!(err, ClassifyError::Parse(_)));
     }
 
     #[test]
     fn parse_rejects_unknown_label() {
         let value = tool_use_response(&["Spam"]);
-        let err = parse_tool_use_response(value, &default_labels()).unwrap_err();
+        let err = parse_tool_use_response(&value, &default_labels()).unwrap_err();
         assert!(matches!(err, ClassifyError::Parse(_)));
     }
 }

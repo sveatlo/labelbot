@@ -4,33 +4,9 @@
 # Copy this file to config.toml, fill in your credentials, and run:
 #   docker compose up -d
 
-# IMAP connection — expects Proton Mail Bridge on localhost:1143
-imap_host = "127.0.0.1"
-imap_port = 1143
-imap_user = "your-proton-email@proton.me"
-imap_password = "put-bridge-smtp-imap-password-here"
-
-# ── Classifier Backend ─────────────────────────────────────────────
-# Which LLM backend to use: "anthropic" (default) or "openai"
-# classifer_backend = "anthropic"
-
-# Anthropic settings (used when classifier_backend = "anthropic")
-# anthropic_api_key can also be set via ANTHROPIC_API_KEY env var
-anthropic_api_key = "sk-ant-..."
-anthropic_model = "claude-haiku-4-5"
-
-# OpenAI-compatible settings (used when classifier_backend = "openai")
-# Point at any OpenAI-compatible API (Open WebUI, Ollama, LiteLLM, etc.)
-# openai_api_key can also be set via OPENAI_API_KEY env var
-# openai_base_url = "http://192.168.1.100:3000/api/v1"
-# openai_api_key = "sk-..."        # may be optional for local deployments
-# openai_model = "llama3"
-
-# ── Optional overrides (shown with defaults) ──────────────────────
-
-# Accept invalid TLS certificates. Default: false. Set to true for Proton Bridge
-# (which uses a self-signed cert on localhost). Do NOT enable for remote IMAP servers.
-tls_insecure = true
+# ── Top-level options (shown with defaults) ───────────────────────────
+# These MUST come before any [table] header, otherwise TOML parses them as
+# keys inside the preceding table.
 
 # Path to SQLite database (for deduplication tracking)
 # db_path = "/app/db/processed.db"
@@ -41,7 +17,36 @@ tls_insecure = true
 # IMAP IDLE poll timeout in seconds before re-sending IDLE
 # poll_idle_timeout_secs = 300
 
-# ── Labels ────────────────────────────────────────────────────────
+# ── IMAP ──────────────────────────────────────────────────────────────
+# Expects Proton Mail Bridge on localhost:1143
+[imap]
+host = "127.0.0.1"
+port = 1143
+user = "your-proton-email@proton.me"
+password = "put-bridge-smtp-imap-password-here"
+
+# Accept invalid TLS certificates. Default: false. Set to true for Proton Bridge
+# (which uses a self-signed cert on localhost). Do NOT enable for remote IMAP servers.
+tls_insecure = true
+
+# ── Classifier ────────────────────────────────────────────────────────
+# Select backend via classifier_backend: "Anthropic" (default) or "OpenAI"
+
+# Anthropic (default)
+[classifier]
+classifier_backend = "Anthropic"
+api_key = "sk-ant-..."
+# model = "claude-haiku-4-5"
+
+# OpenAI-compatible (Open WebUI, Ollama, LiteLLM, etc.)
+# api_key can be omitted for local deployments
+# [classifier]
+# classifier_backend = "OpenAI"
+# api_key = "sk-..."
+# base_url = "http://192.168.1.100:3000/api/v1"
+# model = "llama3"
+
+# ── Labels ────────────────────────────────────────────────────────────
 # Define the set of labels the classifier can pick from. If omitted, the
 # historical defaults are used:
 #   Work, Finance, Newsletters, Receipts, Personal, Travel, Shopping,

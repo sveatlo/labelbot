@@ -1,8 +1,8 @@
 use crate::error::StoreError;
+use chrono::Utc;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
-use chrono::Utc;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -13,8 +13,7 @@ pub struct Store {
 
 impl Store {
     pub async fn connect(db_path: &str) -> Result<Self, StoreError> {
-        let pool_opts = SqliteConnectOptions::from_str(db_path)?
-            .create_if_missing(true);
+        let pool_opts = SqliteConnectOptions::from_str(db_path)?.create_if_missing(true);
 
         // Resolve filename via SqliteConnectOptions so `sqlite://...?...` URIs
         // don't produce a literal `sqlite:` directory.

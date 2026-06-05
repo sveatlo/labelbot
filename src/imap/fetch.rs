@@ -1,7 +1,6 @@
 /// Fetch query string for header-only retrieval.
 /// Requests Message-ID, Subject, and From headers without marking as read.
-pub const HEADER_FETCH_QUERY: &str =
-    "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM)])";
+pub const HEADER_FETCH_QUERY: &str = "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM)])";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmailHeaders {
@@ -42,10 +41,7 @@ mod tests {
     use super::*;
 
     fn raw_fixture(subject: &str, from: &str, msg_id: &str) -> Vec<u8> {
-        format!(
-            "MESSAGE-ID: {msg_id}\r\nSUBJECT: {subject}\r\nFROM: {from}\r\n\r\n"
-        )
-        .into_bytes()
+        format!("MESSAGE-ID: {msg_id}\r\nSUBJECT: {subject}\r\nFROM: {from}\r\n\r\n").into_bytes()
     }
 
     #[test]

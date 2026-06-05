@@ -1,6 +1,6 @@
 use crate::classifier::LlmClassifier;
 use crate::error::ClassifyError;
-use rand::Rng;
+use rand::RngExt;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -78,6 +78,8 @@ async fn execute(
 ) -> Result<Vec<String>, ClassifyError> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
+    tracing::debug!(%url, "sending classification request");
+
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -87,11 +89,14 @@ async fn execute(
         .await?;
 
     let status = resp.status();
+    tracing::debug!(status = %status, "classification response status");
+
     if status == 429 {
         return Err(ClassifyError::RateLimited { attempts: 0 });
     }
     if !status.is_success() {
         let body_text = resp.text().await.unwrap_or_default();
+        tracing::warn!(%status, body = %body_text, "classification API error");
         return Err(ClassifyError::Api {
             status: status.as_u16(),
             body: body_text,
@@ -240,7 +245,7 @@ fn canonicalize(s: &str, known: &[String]) -> Result<String, ClassifyError> {
 
 fn backoff_duration(attempt: u32) -> Duration {
     let base_secs = 2_u64.pow(attempt.saturating_sub(1));
-    let jitter: u64 = rand::thread_rng().gen_range(0..=base_secs);
+    let jitter: u64 = rand::rng().random_range(0..=base_secs);
     Duration::from_secs(base_secs + jitter)
 }
 

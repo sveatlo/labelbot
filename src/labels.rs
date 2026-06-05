@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Name of the auto-applied label for emails matching any user-marked important label.
-pub const IMPORTANT_LABEL: &str = "Important";
+pub const IMPORTANT_LABEL: &str = "important";
 
 /// Per-label user configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,10 +26,7 @@ impl LabelSet {
     pub fn from_config(map: &HashMap<String, LabelConfig>) -> Self {
         let mut names: Vec<String> = map.keys().cloned().collect();
         names.sort_unstable();
-        let map = map
-            .iter()
-            .map(|(k, v)| (k.clone(), v.important))
-            .collect();
+        let map = map.iter().map(|(k, v)| (k.clone(), v.important)).collect();
         Self { names, map }
     }
 

@@ -19,7 +19,7 @@ pub async fn sync_labels(
 ) -> Result<Vec<String>, ImapError> {
     let existing = list_labels(session).await?;
 
-    let mut wanted: Vec<String> = labels.names().iter().cloned().collect();
+    let mut wanted: Vec<String> = labels.names().to_vec();
     if labels.has_any_important() {
         wanted.push(IMPORTANT_LABEL.to_owned());
     }
@@ -27,8 +27,9 @@ pub async fn sync_labels(
     let mut created = Vec::new();
     for label in &wanted {
         let expected = label_mailbox_name(label);
-        if !existing.iter().any(|n| n == &expected) {
-            create_label_mailbox(session, &expected).await?;
+        if !existing.iter().any(|n| n == &expected)
+            && create_label_mailbox(session, &expected).await?
+        {
             created.push(expected);
         }
     }
@@ -67,7 +68,11 @@ async fn list_labels(session: &mut ImapSession) -> Result<Vec<String>, ImapError
             match mb {
                 Ok(ref name) => {
                     let n = name.name();
-                    if n.is_empty() { None } else { Some(n.to_owned()) }
+                    if n.is_empty() {
+                        None
+                    } else {
+                        Some(n.to_owned())
+                    }
                 }
                 _ => None,
             }
@@ -78,16 +83,41 @@ async fn list_labels(session: &mut ImapSession) -> Result<Vec<String>, ImapError
     Ok(names)
 }
 
-async fn create_label_mailbox(
-    session: &mut ImapSession,
-    mailbox: &str,
-) -> Result<(), ImapError> {
-    session
+/// Create a label mailbox. Returns `true` if newly created, `false` if it already existed.
+async fn create_label_mailbox(session: &mut ImapSession, mailbox: &str) -> Result<bool, ImapError> {
+    match session
         .run_command_and_check_ok(format!(r#"CREATE "{mailbox}""#))
-        .await?;
+        .await
+    {
+        Ok(()) => {
+            tracing::info!(mailbox=%mailbox, "created label mailbox");
+            return Ok(true);
+        }
+        Err(e) if e.to_string().to_lowercase().contains("already exists") => {}
+        Err(e) => return Err(e.into()),
+    }
 
-    tracing::info!(mailbox=%mailbox, "created label mailbox");
-    Ok(())
+    // Server said "already exists" — verify the mailbox is actually accessible.
+    // Some servers (e.g. Proton Bridge) report "already exists" for system labels
+    // whose IMAP path differs from what was requested.
+    let accessible = session
+        .list(None, Some(mailbox))
+        .await?
+        .filter_map(|mb| async move { mb.ok() })
+        .any(|mb| async move { mb.name() == mailbox })
+        .await;
+
+    if accessible {
+        tracing::debug!(mailbox=%mailbox, "label mailbox already exists");
+        Ok(false)
+    } else {
+        tracing::warn!(
+            mailbox=%mailbox,
+            "server rejected CREATE with 'already exists' but mailbox not found in LIST; \
+             name may conflict with a system label — label will not be applied"
+        );
+        Ok(false)
+    }
 }
 
 #[cfg(test)]

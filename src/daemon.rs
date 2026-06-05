@@ -15,8 +15,10 @@ pub async fn run(cfg: Config, classifier: Box<dyn LlmClassifier>) -> anyhow::Res
     let labels = cfg.label_set();
 
     let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
     {
         let shutdown = shutdown.clone();
+        let shutdown_notify = shutdown_notify.clone();
         tokio::spawn(async move {
             let mut sigterm =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -31,6 +33,7 @@ pub async fn run(cfg: Config, classifier: Box<dyn LlmClassifier>) -> anyhow::Res
             }
 
             shutdown.store(true, Ordering::Relaxed);
+            shutdown_notify.notify_waiters();
         });
     }
 
@@ -40,7 +43,16 @@ pub async fn run(cfg: Config, classifier: Box<dyn LlmClassifier>) -> anyhow::Res
             return Ok(());
         }
 
-        match run_session(&cfg, &labels, classifier.as_ref(), &store, &shutdown).await {
+        match run_session(
+            &cfg,
+            &labels,
+            classifier.as_ref(),
+            &store,
+            &shutdown,
+            &shutdown_notify,
+        )
+        .await
+        {
             Ok(()) => return Ok(()),
             Err(e) => {
                 if shutdown.load(Ordering::Relaxed) {
@@ -51,7 +63,10 @@ pub async fn run(cfg: Config, classifier: Box<dyn LlmClassifier>) -> anyhow::Res
                 let jitter = rand::random::<u64>() % (base + 1);
                 let wait = std::time::Duration::from_secs(base + jitter);
                 tracing::warn!(attempt, error=%e, wait_secs=wait.as_secs(), "imap session ended, reconnecting after backoff");
-                tokio::time::sleep(wait).await;
+                tokio::select! {
+                    () = tokio::time::sleep(wait) => {},
+                    () = shutdown_notify.notified() => return Ok(()),
+                }
             }
         }
     }
@@ -63,13 +78,14 @@ async fn run_session(
     classifier: &dyn LlmClassifier,
     store: &Store,
     shutdown: &Arc<AtomicBool>,
+    shutdown_notify: &Arc<tokio::sync::Notify>,
 ) -> anyhow::Result<()> {
     let mut session = imap::connect(
-        &cfg.imap_host,
-        cfg.imap_port,
-        &cfg.imap_user,
-        &cfg.imap_password,
-        cfg.tls_insecure,
+        &cfg.imap.host,
+        cfg.imap.port,
+        &cfg.imap.user,
+        &cfg.imap.password,
+        cfg.imap.tls_insecure,
     )
     .await?;
     tracing::info!("connected to IMAP");
@@ -108,7 +124,8 @@ async fn run_session(
         }
 
         let s = session.take().expect("session should be present");
-        let mut idle_loop = idle::enter_idle(s, cfg.poll_idle_timeout_secs).await?;
+        let mut idle_loop =
+            idle::enter_idle(s, cfg.poll_idle_timeout_secs, shutdown_notify.clone()).await?;
 
         session = loop {
             if shutdown.load(Ordering::Relaxed) {

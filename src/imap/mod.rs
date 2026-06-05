@@ -1,6 +1,6 @@
 pub mod fetch;
-pub mod labels;
 pub mod idle;
+pub mod labels;
 
 use crate::error::ImapError;
 use async_imap::Session;
@@ -29,12 +29,13 @@ pub async fn connect(
         native_tls::TlsConnector::new()?
     };
     let connector = tokio_native_tls::TlsConnector::from(native_connector);
-    let tls_stream = connector
-        .connect(host, tcp)
-        .await?;
+    let tls_stream = connector.connect(host, tcp).await?;
 
     let client = async_imap::Client::new(tls_stream);
-    let session = client.login(username, password).await.map_err(|(err, _)| err)?;
+    let session = client
+        .login(username, password)
+        .await
+        .map_err(|(err, _)| err)?;
 
     Ok(session)
 }
