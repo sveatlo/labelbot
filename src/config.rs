@@ -12,6 +12,9 @@ pub struct Config {
     pub imap: ImapConfig,
     pub classifier: ClassifierConfig,
 
+    #[serde(default)]
+    pub summarizer: SummarizerConfig,
+
     #[serde(default = "default_db_path")]
     pub db_path: String,
 
@@ -21,6 +24,31 @@ pub struct Config {
     pub backfill_max_age_days: u64,
     #[serde(default = "LabelSet::default_config")]
     labels: HashMap<String, LabelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "summarizer_backend")]
+pub enum SummarizerConfig {
+    T5 {
+        #[serde(default = "default_summarizer_model")]
+        model_id: String,
+        #[serde(default = "default_max_input_chars")]
+        max_input_chars: usize,
+        #[serde(default = "default_max_output_tokens")]
+        max_output_tokens: usize,
+    },
+    Truncate {
+        #[serde(default = "default_max_input_chars")]
+        max_chars: usize,
+    },
+}
+
+impl Default for SummarizerConfig {
+    fn default() -> Self {
+        Self::Truncate {
+            max_chars: default_max_input_chars(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +78,30 @@ pub enum ClassifierConfig {
     },
 }
 
+impl Default for ClassifierConfig {
+    fn default() -> Self {
+        ClassifierConfig::Anthropic {
+            api_key: String::new(),
+            model: default_anthropic_model(),
+        }
+    }
+}
+
 impl Config {
     pub fn label_set(&self) -> LabelSet {
         LabelSet::from_config(&self.labels)
     }
 }
 
+fn default_summarizer_model() -> String {
+    "t5-base".into()
+}
+fn default_max_input_chars() -> usize {
+    2000
+}
+fn default_max_output_tokens() -> usize {
+    100
+}
 fn default_anthropic_model() -> String {
     "claude-haiku-4-5".into()
 }
@@ -90,10 +136,8 @@ impl Default for Config {
                 password: String::new(),
                 tls_insecure: default_tls_insecure(),
             },
-            classifier: ClassifierConfig::Anthropic {
-                api_key: String::new(),
-                model: default_anthropic_model(),
-            },
+            classifier: ClassifierConfig::default(),
+            summarizer: SummarizerConfig::default(),
             db_path: default_db_path(),
             poll_idle_timeout_secs: default_poll_timeout(),
             backfill_max_age_days: default_backfill_days(),

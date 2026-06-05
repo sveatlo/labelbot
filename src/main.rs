@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use labelbot::classifier::LlmClassifier;
+use labelbot::summarizer::Summarizer;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -47,7 +48,31 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    labelbot::daemon::run(cfg, classifier)
+    let summarizer: Box<dyn Summarizer> = match &cfg.summarizer {
+        labelbot::config::SummarizerConfig::T5 {
+            model_id,
+            max_input_chars,
+            max_output_tokens,
+        } => {
+            tracing::info!(%model_id, "loading T5 summarizer");
+            let s = labelbot::summarizer::t5::T5Summarizer::load(
+                model_id.clone(),
+                *max_input_chars,
+                *max_output_tokens,
+            )
+            .await
+            .context("failed to load T5 summarizer")?;
+            Box::new(s) as Box<dyn Summarizer>
+        }
+        labelbot::config::SummarizerConfig::Truncate { max_chars } => {
+            tracing::info!(%max_chars, "using truncate summarizer");
+            Box::new(labelbot::summarizer::truncate::TruncateSummarizer::new(
+                *max_chars,
+            )) as Box<dyn Summarizer>
+        }
+    };
+
+    labelbot::daemon::run(cfg, classifier, summarizer)
         .await
         .context("daemon exited with error")?;
 

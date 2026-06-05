@@ -2,15 +2,15 @@ pub mod anthropic;
 pub mod openai;
 
 use crate::error::ClassifyError;
-use std::future::Future;
-use std::pin::Pin;
 
+#[async_trait::async_trait]
 pub trait LlmClassifier: Send + Sync {
-    fn classify<'a>(
-        &'a self,
-        subject: &'a str,
-        from_addr: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ClassifyError>> + Send + 'a>>;
+    async fn classify(
+        &self,
+        subject: &str,
+        from_addr: &str,
+        body_summary: Option<&str>,
+    ) -> Result<Vec<String>, ClassifyError>;
 }
 
 #[cfg(test)]
@@ -20,13 +20,14 @@ pub(crate) struct MockClassifier {
 }
 
 #[cfg(test)]
+#[async_trait::async_trait]
 impl LlmClassifier for MockClassifier {
-    fn classify<'a>(
-        &'a self,
-        _subject: &'a str,
-        _from_addr: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ClassifyError>> + Send + 'a>> {
-        let labels = self.labels.clone();
-        Box::pin(async move { Ok(labels) })
+    async fn classify(
+        &self,
+        _subject: &str,
+        _from_addr: &str,
+        _body_summary: Option<&str>,
+    ) -> Result<Vec<String>, ClassifyError> {
+        Ok(self.labels.clone())
     }
 }

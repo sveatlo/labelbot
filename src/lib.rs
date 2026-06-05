@@ -6,6 +6,8 @@ pub mod error;
 pub mod imap;
 pub mod labels;
 pub mod store;
+pub mod summarizer;
+pub(crate) mod util;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const GIT_HASH: &str = match option_env!("GIT_HASH") {

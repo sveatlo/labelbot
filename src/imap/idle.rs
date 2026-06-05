@@ -3,20 +3,19 @@ use crate::imap::{ImapSession, fetch};
 use async_imap::extensions::idle::IdleResponse;
 use futures::StreamExt;
 use std::fmt;
-use std::sync::Arc;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 pub async fn enter_idle(
     session: ImapSession,
     timeout_secs: u64,
-    shutdown: Arc<Notify>,
+    token: CancellationToken,
 ) -> Result<IdleLoop, ImapError> {
     let mut idle = session.idle();
     idle.init().await?;
     Ok(IdleLoop {
         idle: Some(idle),
         timeout: std::time::Duration::from_secs(timeout_secs),
-        shutdown,
+        token,
     })
 }
 
@@ -25,15 +24,15 @@ pub struct IdleLoop {
         async_imap::extensions::idle::Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
     >,
     timeout: std::time::Duration,
-    shutdown: Arc<Notify>,
+    token: CancellationToken,
 }
 
-#[expect(clippy::missing_fields_in_debug)]
 impl fmt::Debug for IdleLoop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IdleLoop")
             .field("idle", &self.idle.as_ref().map(|_| "Handle<..>"))
             .field("timeout", &self.timeout)
+            .field("token", &self.token)
             .finish()
     }
 }
@@ -50,7 +49,7 @@ impl IdleLoop {
             tokio::pin!(fut);
             tokio::select! {
                 result = &mut fut => Some(result?),
-                () = self.shutdown.notified() => None,
+                () = self.token.cancelled() => None,
             }
         };
 

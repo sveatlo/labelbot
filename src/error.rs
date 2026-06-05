@@ -58,6 +58,15 @@ pub enum ImapError {
 }
 
 #[derive(Debug, Error)]
+pub enum SummarizeError {
+    #[error("inference failed: {0}")]
+    Inference(String),
+
+    #[error("summarizer task panicked")]
+    TaskPanicked,
+}
+
+#[derive(Debug, Error)]
 pub enum AppError {
     #[error(transparent)]
     Config(#[from] ConfigError),

@@ -2,6 +2,72 @@
 /// Requests Message-ID, Subject, and From headers without marking as read.
 pub const HEADER_FETCH_QUERY: &str = "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM)])";
 
+/// Fetch the plain-text body of a message by UID. Returns `None` if not found or no text part.
+pub async fn fetch_message_body(
+    session: &mut super::ImapSession,
+    uid: u32,
+) -> anyhow::Result<Option<String>> {
+    use futures::StreamExt as _;
+
+    let stream = session
+        .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
+        .await?;
+    tokio::pin!(stream);
+
+    while let Some(msg) = stream.next().await {
+        let msg = msg?;
+        if let Some(raw) = msg.body() {
+            let parsed =
+                mailparse::parse_mail(raw).map_err(|e| anyhow::anyhow!("parse mail: {e}"))?;
+            let text = extract_text_body(&parsed);
+            tracing::debug!(uid, text_len = text.len(), "fetched message body");
+            if !text.is_empty() {
+                return Ok(Some(text));
+            }
+        } else {
+            tracing::debug!(uid, "BODY.PEEK[] fetch returned no body data");
+        }
+    }
+
+    tracing::debug!(uid, "no usable text body found in message");
+    Ok(None)
+}
+
+/// Extract text content: prefer text/plain, fall back to stripped text/html.
+fn extract_text_body(mail: &mailparse::ParsedMail<'_>) -> String {
+    let mime = mail.ctype.mimetype.to_ascii_lowercase();
+
+    if mime == "text/plain" {
+        return mail.get_body().unwrap_or_default();
+    }
+
+    if mime == "text/html" {
+        return crate::util::strip_html_tags(&mail.get_body().unwrap_or_default());
+    }
+
+    if mime.starts_with("multipart/") {
+        // First pass: look for text/plain
+        for part in &mail.subparts {
+            if part.ctype.mimetype.eq_ignore_ascii_case("text/plain") {
+                let text = part.get_body().unwrap_or_default();
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+        }
+        // Second pass: recurse (catches nested multipart and text/html fallback)
+        for part in &mail.subparts {
+            let text = extract_text_body(part);
+            if !text.is_empty() {
+                return text;
+            }
+        }
+    }
+
+    String::new()
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmailHeaders {
     pub message_id: String,

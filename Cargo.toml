@@ -38,6 +38,7 @@ wildcard_enum_match_arm = "warn"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 async-imap = { version = "0.11", default-features = false, features = [
   "runtime-tokio",
 ] }
@@ -47,6 +48,7 @@ figment = { version = "0.10", features = ["toml", "env"] }
 futures = "0.3"
 mailparse = "0.16"
 native-tls = "0.2"
+parking_lot = "0.12"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
@@ -62,7 +64,13 @@ sqlx = { version = "0.9", default-features = false, features = [
   "migrate",
   "macros",
 ] }
+candle-core = "0.10.2"
+html5ever = "0.29.1"
+candle-nn = "0.10.2"
+candle-transformers = "0.10.2"
+hf-hub = "0.5"
 thiserror = "2"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 tokio = { version = "1", features = [
   "rt-multi-thread",
   "macros",
@@ -73,6 +81,7 @@ tokio = { version = "1", features = [
   "sync",
 ] }
 tokio-native-tls = "0.3"
+tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2.5.8", features = ["serde"] }

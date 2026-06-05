@@ -2,8 +2,6 @@ use crate::classifier::LlmClassifier;
 use crate::error::ClassifyError;
 use rand::RngExt;
 use serde_json::Value;
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 const MAX_RETRIES: u32 = 5;
@@ -34,37 +32,33 @@ impl OpenAiClassifier {
     }
 }
 
+#[async_trait::async_trait]
 impl LlmClassifier for OpenAiClassifier {
-    fn classify<'a>(
-        &'a self,
-        subject: &'a str,
-        from_addr: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ClassifyError>> + Send + 'a>> {
-        let body = build_request_body(&self.model, subject, from_addr, &self.labels);
-        let known: Vec<String> = self.labels.clone();
-        let base_url = self.base_url.clone();
-        let api_key = self.api_key.clone();
-        let client = self.client.clone();
+    async fn classify(
+        &self,
+        subject: &str,
+        from_addr: &str,
+        body_summary: Option<&str>,
+    ) -> Result<Vec<String>, ClassifyError> {
+        let body = build_request_body(&self.model, subject, from_addr, body_summary, &self.labels);
 
-        Box::pin(async move {
-            for attempt in 1..=MAX_RETRIES {
-                match execute(&client, &base_url, &api_key, &body, &known).await {
-                    Ok(labels) => return Ok(labels),
-                    Err(ClassifyError::RateLimited { .. }) if attempt < MAX_RETRIES => {
-                        tokio::time::sleep(backoff_duration(attempt)).await;
-                    }
-                    Err(ClassifyError::Api { status, .. })
-                        if status >= 500 && attempt < MAX_RETRIES =>
-                    {
-                        tokio::time::sleep(backoff_duration(attempt)).await;
-                    }
-                    Err(e) => return Err(e),
+        for attempt in 1..=MAX_RETRIES {
+            match execute(&self.client, &self.base_url, &self.api_key, &body, &self.labels).await {
+                Ok(labels) => return Ok(labels),
+                Err(ClassifyError::RateLimited { .. }) if attempt < MAX_RETRIES => {
+                    tokio::time::sleep(backoff_duration(attempt)).await;
                 }
+                Err(ClassifyError::Api { status, .. })
+                    if status >= 500 && attempt < MAX_RETRIES =>
+                {
+                    tokio::time::sleep(backoff_duration(attempt)).await;
+                }
+                Err(e) => return Err(e),
             }
+        }
 
-            Err(ClassifyError::RateLimited {
-                attempts: MAX_RETRIES,
-            })
+        Err(ClassifyError::RateLimited {
+            attempts: MAX_RETRIES,
         })
     }
 }
@@ -107,12 +101,20 @@ async fn execute(
     parse_response(&value, known_labels)
 }
 
-fn build_request_body(model: &str, subject: &str, from_addr: &str, labels: &[String]) -> Value {
+fn build_request_body(
+    model: &str,
+    subject: &str,
+    from_addr: &str,
+    body_summary: Option<&str>,
+    labels: &[String],
+) -> Value {
     let label_enum: Vec<Value> = labels.iter().map(|l| Value::String(l.clone())).collect();
 
-    let user_content = format!(
-        "From: {from_addr}\nSubject: {subject}\n\nClassify this email into one or more of the defined labels."
-    );
+    let user_content = if let Some(summary) = body_summary {
+        format!("From: {from_addr}\nSubject: {subject}\nBody summary: {summary}\n\nClassify this email into one or more of the defined labels.")
+    } else {
+        format!("From: {from_addr}\nSubject: {subject}\n\nClassify this email into one or more of the defined labels.")
+    };
 
     serde_json::json!({
         "model": model,
@@ -323,7 +325,7 @@ mod tests {
             .await;
 
         let classifier = make_classifier(&server);
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let labels = execute(
             &classifier.client,
             &server.uri(),
@@ -346,7 +348,7 @@ mod tests {
             .await;
 
         let classifier = make_classifier(&server);
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let labels = execute(
             &classifier.client,
             &server.uri(),
@@ -369,7 +371,7 @@ mod tests {
             .await;
 
         let classifier = make_classifier(&server);
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let err = execute(
             &classifier.client,
             &server.uri(),
@@ -487,7 +489,7 @@ mod tests {
             .await;
 
         let classifier = make_classifier(&server);
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let err = execute(
             &classifier.client,
             &server.uri(),
@@ -510,7 +512,7 @@ mod tests {
             .await;
 
         let classifier = make_classifier(&server);
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let err = execute(
             &classifier.client,
             &server.uri(),
@@ -542,7 +544,7 @@ mod tests {
             "gpt-4o-mini".into(),
             default_labels(),
         );
-        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", &default_labels());
+        let body = build_request_body("gpt-4o-mini", "test", "from@x.com", None, &default_labels());
         let result = execute(
             &classifier.client,
             &base_url,
