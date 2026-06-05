@@ -123,7 +123,7 @@ fn default_openai_base_url() -> Url {
         .expect("BUG: invalid hardcoded OpenAI URL")
 }
 fn default_openai_model() -> String {
-    "llama3".into()
+    "gpt-5.4-nano".into()
 }
 
 impl Default for Config {
