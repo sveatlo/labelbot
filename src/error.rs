@@ -44,9 +44,6 @@ pub enum ImapError {
     #[error("imap protocol error: {0}")]
     Imap(#[from] async_imap::error::Error),
 
-    #[error("tls error: {0}")]
-    Tls(#[from] native_tls::Error),
-
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

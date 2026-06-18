@@ -21,7 +21,9 @@ pub async fn enter_idle(
 
 pub struct IdleLoop {
     idle: Option<
-        async_imap::extensions::idle::Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+        async_imap::extensions::idle::Handle<
+            tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
+        >,
     >,
     timeout: std::time::Duration,
     token: CancellationToken,
@@ -68,7 +70,7 @@ impl IdleLoop {
 
     async fn complete(
         idle: async_imap::extensions::idle::Handle<
-            tokio_native_tls::TlsStream<tokio::net::TcpStream>,
+            tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
         >,
     ) -> Result<ImapSession, ImapError> {
         Ok(idle.done().await?)
