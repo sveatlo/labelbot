@@ -1,0 +1,96 @@
+[package]
+name = "labelbot"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+# deny
+unused_must_use = "deny"
+# warn
+explicit_outlives_requirements = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+macro_use_extern_crate = "warn"
+missing_debug_implementations = "warn"
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+trivial_numeric_casts = "warn"
+# unused_crate_dependencies = "warn"
+# allow
+deprecated = "allow"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# lints from the clippy::pedantic group that are explicitly allowed
+doc_markdown = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+new_without_default = "allow"
+similar_names = "allow"
+unreadable_literal = "allow"
+# additional useful lints not coveded by clippy::pedantic
+allow_attributes = "warn"
+get_unwrap = "warn"
+integer_division = "warn"
+lossy_float_literal = "warn"
+modulo_arithmetic = "warn"
+rc_buffer = "warn"
+rc_mutex = "warn"
+str_to_string = "warn"
+string_add = "warn"
+string_slice = "warn"
+implicit_clone = "warn"
+unneeded_field_pattern = "warn"
+unseparated_literal_suffix = "warn"
+wildcard_enum_match_arm = "warn"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+async-imap = { version = "0.11", default-features = false, features = [
+  "runtime-tokio",
+] }
+chrono = { version = "0.4" }
+clap = { version = "4.6.1", features = ["derive"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+futures = "0.3"
+mailparse = "0.16"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "rustls",
+  "http2",
+  "charset",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "sqlite",
+  "migrate",
+  "macros",
+] }
+html5ever = "0.39.0"
+thiserror = "2"
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "time",
+  "signal",
+  "io-util",
+  "sync",
+] }
+tokio-rustls = "0.26"
+tokio-util = "0.7"
+webpki-roots = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2.5.8", features = ["serde"] }
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+
+[build-dependencies]
+chrono = { version = "0.4" }

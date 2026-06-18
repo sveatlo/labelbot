@@ -1,0 +1,17 @@
+services:
+  labelbot:
+    build: .
+    container_name: labelbot
+    restart: unless-stopped
+    # Host network is required to reach Proton Bridge on host's 127.0.0.1:1143
+    network_mode: host
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - labelbot-db:/app/db
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?must be set in .env or shell}
+      - RUST_LOG=${RUST_LOG:-info,labelbot=debug}
+      - APP_DB_PATH=/app/db/processed.db
+
+volumes:
+  labelbot-db:
