@@ -3,8 +3,7 @@ use std::cell::{Cell, RefCell};
 use html5ever::tendril::StrTendril;
 use html5ever::tokenizer::TagKind::{EndTag, StartTag};
 use html5ever::tokenizer::{
-    BufferQueue, CharacterTokens, TagToken, Token, TokenSink, TokenSinkResult, Tokenizer,
-    TokenizerOpts,
+    BufferQueue, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
 };
 
 struct TextExtractor {
@@ -17,12 +16,12 @@ impl TokenSink for TextExtractor {
 
     fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<()> {
         match token {
-            CharacterTokens(s) => {
+            Token::CharacterTokens(s) => {
                 if self.skip_depth.get() == 0 {
                     self.text.borrow_mut().push_str(&s);
                 }
             }
-            TagToken(tag) => {
+            Token::TagToken(tag) => {
                 if &*tag.name == "script" || &*tag.name == "style" {
                     match tag.kind {
                         StartTag => self.skip_depth.set(self.skip_depth.get() + 1),
@@ -30,7 +29,11 @@ impl TokenSink for TextExtractor {
                     }
                 }
             }
-            _ => {}
+            Token::DoctypeToken(_)
+            | Token::CommentToken(_)
+            | Token::NullCharacterToken
+            | Token::EOFToken
+            | Token::ParseError(_) => {}
         }
         TokenSinkResult::Continue
     }

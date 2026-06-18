@@ -18,6 +18,7 @@ pub struct AnthropicClassifier {
 }
 
 impl AnthropicClassifier {
+    #[must_use] 
     pub fn new(api_key: String, model: String, labels: Vec<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))

@@ -7,6 +7,7 @@ pub struct TruncateSummarizer {
 }
 
 impl TruncateSummarizer {
+    #[must_use] 
     pub fn new(max_chars: usize) -> Self {
         Self { max_chars }
     }

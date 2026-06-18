@@ -283,7 +283,7 @@ async fn decide_labels(
 ) -> ClassifyOutcome {
     match classifier.classify(subject, from_addr, body_summary).await {
         ClassifyOutcome::Labels(labels) => ClassifyOutcome::Labels(label_set.augment(labels)),
-        other => other,
+        other @ (ClassifyOutcome::Terminal | ClassifyOutcome::Transient) => other,
     }
 }
 

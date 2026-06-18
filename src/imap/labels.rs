@@ -6,6 +6,7 @@ use futures::StreamExt;
 const LABEL_PREFIX: &str = "Labels";
 
 /// Build the IMAP mailbox name for a label (e.g. "Work" -> "Labels/Work").
+#[must_use] 
 pub fn label_mailbox_name(label: &str) -> String {
     format!("{LABEL_PREFIX}/{label}")
 }

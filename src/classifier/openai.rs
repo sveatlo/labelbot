@@ -16,6 +16,7 @@ pub struct OpenAiClassifier {
 }
 
 impl OpenAiClassifier {
+    #[must_use] 
     pub fn new(base_url: String, api_key: String, model: String, labels: Vec<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))

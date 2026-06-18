@@ -78,6 +78,7 @@ pub struct EmailHeaders {
 /// Parse raw header bytes (as returned by IMAP FETCH BODY.PEEK[HEADER.FIELDS ...])
 /// into structured headers. The input is a raw RFC 5322 header block containing
 /// only the requested header lines.
+#[must_use] 
 pub fn parse_header_bytes(raw: &[u8]) -> EmailHeaders {
     let Ok((headers, _)) = mailparse::parse_headers(raw) else {
         return EmailHeaders {

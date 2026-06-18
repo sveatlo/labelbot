@@ -23,6 +23,7 @@ pub struct LabelSet {
 }
 
 impl LabelSet {
+    #[must_use] 
     pub fn from_config(map: &HashMap<String, LabelConfig>) -> Self {
         let mut names: Vec<String> = map.keys().cloned().collect();
         names.sort_unstable();
@@ -31,6 +32,7 @@ impl LabelSet {
     }
 
     /// Canonical names, sorted, suitable for the classifier enum.
+    #[must_use] 
     pub fn names(&self) -> &[String] {
         &self.names
     }
@@ -43,18 +45,21 @@ impl LabelSet {
             .map(String::as_str)
     }
 
+    #[must_use] 
     pub fn is_important(&self, canonical_name: &str) -> bool {
         self.map.get(canonical_name).copied().unwrap_or(false)
     }
 
     /// True if any configured label is marked important. When false, the
     /// "Important" auxiliary mailbox is not needed.
+    #[must_use] 
     pub fn has_any_important(&self) -> bool {
         self.map.values().any(|v| *v)
     }
 
     /// If any label in `labels` is marked important and `IMPORTANT_LABEL` is
     /// not already present, appends it. Returns the (possibly extended) list.
+    #[must_use] 
     pub fn augment(&self, mut labels: Vec<String>) -> Vec<String> {
         if labels.iter().any(|l| self.is_important(l))
             && !labels.iter().any(|l| l == IMPORTANT_LABEL)
@@ -66,6 +71,7 @@ impl LabelSet {
 
     /// The default label set used when the user omits `[labels]` from the
     /// config: the historical ten labels, none marked important.
+    #[must_use] 
     pub fn default_names() -> [&'static str; 10] {
         [
             "Work",
@@ -81,6 +87,7 @@ impl LabelSet {
         ]
     }
 
+    #[must_use] 
     pub fn default_config() -> HashMap<String, LabelConfig> {
         Self::default_names()
             .iter()
