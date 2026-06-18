@@ -1,4 +1,3 @@
-pub mod t5;
 pub mod truncate;
 
 use crate::error::SummarizeError;

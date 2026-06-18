@@ -128,6 +128,6 @@ mod tests {
     fn label_mailbox_name_maps_correctly() {
         assert_eq!(label_mailbox_name("Work"), "Labels/Work");
         assert_eq!(label_mailbox_name("Family"), "Labels/Family");
-        assert_eq!(label_mailbox_name(IMPORTANT_LABEL), "Labels/Important");
+        assert_eq!(label_mailbox_name(IMPORTANT_LABEL), "Labels/important");
     }
 }

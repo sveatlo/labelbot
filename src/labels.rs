@@ -53,6 +53,17 @@ impl LabelSet {
         self.map.values().any(|v| *v)
     }
 
+    /// If any label in `labels` is marked important and `IMPORTANT_LABEL` is
+    /// not already present, appends it. Returns the (possibly extended) list.
+    pub fn augment(&self, mut labels: Vec<String>) -> Vec<String> {
+        if labels.iter().any(|l| self.is_important(l))
+            && !labels.iter().any(|l| l == IMPORTANT_LABEL)
+        {
+            labels.push(IMPORTANT_LABEL.to_owned());
+        }
+        labels
+    }
+
     /// The default label set used when the user omits `[labels]` from the
     /// config: the historical ten labels, none marked important.
     pub fn default_names() -> [&'static str; 10] {
@@ -116,5 +127,32 @@ mod tests {
     fn names_are_sorted() {
         let set = LabelSet::from_config(&cfg(&[("Zebra", false), ("Apple", false)]));
         assert_eq!(set.names(), &["Apple".to_owned(), "Zebra".to_owned()]);
+    }
+
+    #[test]
+    fn augment_adds_important_when_important_label_matched() {
+        let set = LabelSet::from_config(&cfg(&[("Work", true), ("Personal", false)]));
+        let result = set.augment(vec!["Work".to_owned()]);
+        assert_eq!(result, vec!["Work".to_owned(), IMPORTANT_LABEL.to_owned()]);
+    }
+
+    #[test]
+    fn augment_does_not_duplicate_important() {
+        let set = LabelSet::from_config(&cfg(&[("Work", true)]));
+        let result = set.augment(vec!["Work".to_owned(), IMPORTANT_LABEL.to_owned()]);
+        assert_eq!(result.iter().filter(|l| *l == IMPORTANT_LABEL).count(), 1);
+    }
+
+    #[test]
+    fn augment_no_op_when_no_label_is_important() {
+        let set = LabelSet::from_config(&cfg(&[("Work", false), ("Personal", false)]));
+        let labels = vec!["Work".to_owned()];
+        assert_eq!(set.augment(labels.clone()), labels);
+    }
+
+    #[test]
+    fn augment_no_op_on_empty_input() {
+        let set = LabelSet::from_config(&cfg(&[("Work", true)]));
+        assert!(set.augment(vec![]).is_empty());
     }
 }

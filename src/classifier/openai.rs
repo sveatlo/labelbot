@@ -1,4 +1,4 @@
-use crate::classifier::LlmClassifier;
+use crate::classifier::{ClassifyOutcome, LlmClassifier};
 use crate::error::ClassifyError;
 use rand::RngExt;
 use serde_json::Value;
@@ -39,12 +39,12 @@ impl LlmClassifier for OpenAiClassifier {
         subject: &str,
         from_addr: &str,
         body_summary: Option<&str>,
-    ) -> Result<Vec<String>, ClassifyError> {
+    ) -> ClassifyOutcome {
         let body = build_request_body(&self.model, subject, from_addr, body_summary, &self.labels);
 
         for attempt in 1..=MAX_RETRIES {
             match execute(&self.client, &self.base_url, &self.api_key, &body, &self.labels).await {
-                Ok(labels) => return Ok(labels),
+                Ok(labels) => return ClassifyOutcome::Labels(labels),
                 Err(ClassifyError::RateLimited { .. }) if attempt < MAX_RETRIES => {
                     tokio::time::sleep(backoff_duration(attempt)).await;
                 }
@@ -53,13 +53,19 @@ impl LlmClassifier for OpenAiClassifier {
                 {
                     tokio::time::sleep(backoff_duration(attempt)).await;
                 }
-                Err(e) => return Err(e),
+                Err(e @ (ClassifyError::Parse(_) | ClassifyError::Unimplemented(_))) => {
+                    tracing::warn!(error=%e, "permanent classification failure");
+                    return ClassifyOutcome::Terminal;
+                }
+                Err(e) => {
+                    tracing::warn!(error=%e, attempt, "transient classification failure");
+                    return ClassifyOutcome::Transient;
+                }
             }
         }
 
-        Err(ClassifyError::RateLimited {
-            attempts: MAX_RETRIES,
-        })
+        tracing::warn!(attempts = MAX_RETRIES, "all retries exhausted");
+        ClassifyOutcome::Transient
     }
 }
 

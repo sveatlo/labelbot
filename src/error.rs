@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("configuration load failed: {0}")]
-    Load(#[from] figment::Error),
+    Load(#[from] Box<figment::Error>),
 
     #[error("missing required configuration value: {0}")]
     Missing(&'static str),
@@ -73,9 +73,6 @@ pub enum AppError {
 
     #[error(transparent)]
     Store(#[from] StoreError),
-
-    #[error(transparent)]
-    Classify(#[from] ClassifyError),
 
     #[error(transparent)]
     Imap(#[from] ImapError),

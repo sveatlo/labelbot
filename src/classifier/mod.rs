@@ -1,7 +1,18 @@
 pub mod anthropic;
 pub mod openai;
 
-use crate::error::ClassifyError;
+/// The outcome of a classification attempt, from the caller's perspective.
+/// Internal error details (HTTP status, JSON parse failures) are absorbed by
+/// the adapter and do not cross this seam.
+#[derive(Debug)]
+pub enum ClassifyOutcome {
+    /// Classifier returned a (possibly empty) label list.
+    Labels(Vec<String>),
+    /// Permanent failure — record the message as processed to avoid looping.
+    Terminal,
+    /// Temporary failure — skip recording; retry on the next notification.
+    Transient,
+}
 
 #[async_trait::async_trait]
 pub trait LlmClassifier: Send + Sync {
@@ -10,7 +21,7 @@ pub trait LlmClassifier: Send + Sync {
         subject: &str,
         from_addr: &str,
         body_summary: Option<&str>,
-    ) -> Result<Vec<String>, ClassifyError>;
+    ) -> ClassifyOutcome;
 }
 
 #[cfg(test)]
@@ -27,7 +38,7 @@ impl LlmClassifier for MockClassifier {
         _subject: &str,
         _from_addr: &str,
         _body_summary: Option<&str>,
-    ) -> Result<Vec<String>, ClassifyError> {
-        Ok(self.labels.clone())
+    ) -> ClassifyOutcome {
+        ClassifyOutcome::Labels(self.labels.clone())
     }
 }

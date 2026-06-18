@@ -1,12 +1,11 @@
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
 
-use crate::classifier::LlmClassifier;
+use crate::classifier::{ClassifyOutcome, LlmClassifier};
 use crate::config::Config;
-use crate::error::ClassifyError;
 use crate::imap;
 use crate::imap::idle;
-use crate::labels::{IMPORTANT_LABEL, LabelSet};
+use crate::labels::LabelSet;
 use crate::store::Store;
 use crate::summarizer::Summarizer;
 
@@ -98,7 +97,7 @@ async fn run_session(
     }
 
     session.select("INBOX").await?;
-    tracing::info!("selected INBOX");
+    tracing::debug!("selected INBOX");
 
     if cfg.backfill_max_age_days > 0 {
         backfill(
@@ -247,21 +246,17 @@ async fn backfill(
     Ok(())
 }
 
-/// Classify an email via the LLM, apply labels to IMAP mailbox, and record in the
-/// deduplication store. Non-fatal store errors are logged but not propagated.
-async fn classify_and_record(
-    classifier: &dyn LlmClassifier,
-    summarizer: &dyn Summarizer,
+/// Fetch and summarise the message body. Returns `None` on any failure so
+/// classification can proceed without a body rather than aborting.
+async fn fetch_and_summarize(
     session: &mut imap::ImapSession,
-    store: &Store,
-    label_set: &LabelSet,
+    summarizer: &dyn Summarizer,
     uid: u32,
-    headers: &imap::fetch::EmailHeaders,
-) -> Result<(), anyhow::Error> {
-    let body_summary = match imap::fetch::fetch_message_body(session, uid).await {
+) -> Option<String> {
+    match imap::fetch::fetch_message_body(session, uid).await {
         Ok(Some(body)) => match summarizer.summarize(&body).await {
             Ok(s) => {
-                tracing::debug!(%uid, %s, "body summarized for classification");
+                tracing::debug!(%uid, summary_len = s.len(), "body summarized for classification");
                 Some(s)
             }
             Err(e) => {
@@ -274,44 +269,70 @@ async fn classify_and_record(
             tracing::warn!(%uid, error=%e, "body fetch failed, proceeding without body");
             None
         }
-    };
+    }
+}
 
-    match classifier
-        .classify(&headers.subject, &headers.from, body_summary.as_deref())
-        .await
+/// Pure classification decision: call the classifier and augment the result
+/// with the importance label if applicable. No I/O — testable with a mock.
+async fn decide_labels(
+    classifier: &dyn LlmClassifier,
+    label_set: &LabelSet,
+    subject: &str,
+    from_addr: &str,
+    body_summary: Option<&str>,
+) -> ClassifyOutcome {
+    match classifier.classify(subject, from_addr, body_summary).await {
+        ClassifyOutcome::Labels(labels) => ClassifyOutcome::Labels(label_set.augment(labels)),
+        other => other,
+    }
+}
+
+/// Classify an email, apply labels to IMAP, and record in the dedup store.
+/// Non-fatal store errors are logged but not propagated.
+async fn classify_and_record(
+    classifier: &dyn LlmClassifier,
+    summarizer: &dyn Summarizer,
+    session: &mut imap::ImapSession,
+    store: &Store,
+    label_set: &LabelSet,
+    uid: u32,
+    headers: &imap::fetch::EmailHeaders,
+) -> Result<(), anyhow::Error> {
+    let body_summary = fetch_and_summarize(session, summarizer, uid).await;
+
+    match decide_labels(
+        classifier,
+        label_set,
+        &headers.subject,
+        &headers.from,
+        body_summary.as_deref(),
+    )
+    .await
     {
-        Ok(mut labels) => {
-            if labels.iter().any(|l| label_set.is_important(l))
-                && !labels.iter().any(|l| l == IMPORTANT_LABEL)
-            {
-                labels.push(IMPORTANT_LABEL.to_owned());
-            }
-
+        ClassifyOutcome::Labels(labels) => {
             if !labels.is_empty() {
                 imap::labels::apply_labels(session, uid, &labels).await?;
             }
-
             let label_str = labels.join(",");
             tracing::info!(msg_id = %headers.message_id, labels = %label_str, "classified");
             if let Err(e) = store.record(&headers.message_id, &label_str).await {
                 tracing::error!(msg_id = %headers.message_id, error = %e, "store record failed");
             }
         }
-        Err(ClassifyError::RateLimited { .. }) => {
-            tracing::warn!("rate limited, pausing classification");
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        }
-        Err(e @ (ClassifyError::Parse(_) | ClassifyError::Unimplemented(_))) => {
-            // Terminal: classifier produced an unusable response. Record so we
-            // don't loop on the same message forever.
-            tracing::error!(msg_id = %headers.message_id, error = %e, "classification permanently failed, marking processed");
-            if let Err(err) = store.record(&headers.message_id, "").await {
-                tracing::error!(msg_id = %headers.message_id, error = %err, "store record failed");
+        ClassifyOutcome::Terminal => {
+            tracing::error!(
+                msg_id = %headers.message_id,
+                "classification permanently failed, marking processed"
+            );
+            if let Err(e) = store.record(&headers.message_id, "").await {
+                tracing::error!(msg_id = %headers.message_id, error = %e, "store record failed");
             }
         }
-        Err(e) => {
-            // Transient (HTTP, 5xx, transport): do NOT record, retry on next pass.
-            tracing::warn!(msg_id = %headers.message_id, error = %e, "classification transient failure, will retry");
+        ClassifyOutcome::Transient => {
+            tracing::warn!(
+                msg_id = %headers.message_id,
+                "classification transient failure, will retry"
+            );
         }
     }
 

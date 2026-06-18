@@ -1,6 +1,8 @@
 use anyhow::Context;
 use clap::Parser;
 use labelbot::classifier::LlmClassifier;
+use labelbot::classifier::anthropic::AnthropicClassifier;
+use labelbot::classifier::openai::OpenAiClassifier;
 use labelbot::summarizer::Summarizer;
 use tracing_subscriber::EnvFilter;
 
@@ -9,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,labelbot=debug")),
+                .unwrap_or_else(|_| EnvFilter::new("info,labelbot=info")),
         )
         .init();
 
@@ -33,37 +35,18 @@ async fn main() -> anyhow::Result<()> {
             api_key,
             base_url,
             model,
-        } => Box::new(labelbot::classifier::openai::OpenAiClassifier::new(
+        } => Box::new(OpenAiClassifier::new(
             base_url.to_string(),
             api_key.clone(),
             model.clone(),
             label_names,
         )),
-        labelbot::config::ClassifierConfig::Anthropic { api_key, model } => {
-            Box::new(labelbot::classifier::anthropic::AnthropicClassifier::new(
-                api_key.clone(),
-                model.clone(),
-                label_names,
-            ))
-        }
+        labelbot::config::ClassifierConfig::Anthropic { api_key, model } => Box::new(
+            AnthropicClassifier::new(api_key.clone(), model.clone(), label_names),
+        ),
     };
 
     let summarizer: Box<dyn Summarizer> = match &cfg.summarizer {
-        labelbot::config::SummarizerConfig::T5 {
-            model_id,
-            max_input_chars,
-            max_output_tokens,
-        } => {
-            tracing::info!(%model_id, "loading T5 summarizer");
-            let s = labelbot::summarizer::t5::T5Summarizer::load(
-                model_id.clone(),
-                *max_input_chars,
-                *max_output_tokens,
-            )
-            .await
-            .context("failed to load T5 summarizer")?;
-            Box::new(s) as Box<dyn Summarizer>
-        }
         labelbot::config::SummarizerConfig::Truncate { max_chars } => {
             tracing::info!(%max_chars, "using truncate summarizer");
             Box::new(labelbot::summarizer::truncate::TruncateSummarizer::new(

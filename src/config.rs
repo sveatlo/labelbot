@@ -29,14 +29,6 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "summarizer_backend")]
 pub enum SummarizerConfig {
-    T5 {
-        #[serde(default = "default_summarizer_model")]
-        model_id: String,
-        #[serde(default = "default_max_input_chars")]
-        max_input_chars: usize,
-        #[serde(default = "default_max_output_tokens")]
-        max_output_tokens: usize,
-    },
     Truncate {
         #[serde(default = "default_max_input_chars")]
         max_chars: usize,
@@ -88,40 +80,42 @@ impl Default for ClassifierConfig {
 }
 
 impl Config {
+    #[must_use]
     pub fn label_set(&self) -> LabelSet {
         LabelSet::from_config(&self.labels)
     }
 }
 
-fn default_summarizer_model() -> String {
-    "t5-base".into()
-}
 fn default_max_input_chars() -> usize {
     2000
 }
-fn default_max_output_tokens() -> usize {
-    100
-}
+
 fn default_anthropic_model() -> String {
     "claude-haiku-4-5".into()
 }
+
 fn default_db_path() -> String {
     "./local.db".into()
 }
+
 fn default_poll_timeout() -> u64 {
     300
 }
+
 fn default_tls_insecure() -> bool {
     false
 }
+
 fn default_backfill_days() -> u64 {
     0
 }
+
 fn default_openai_base_url() -> Url {
     "https://api.openai.com/v1/"
         .parse()
         .expect("BUG: invalid hardcoded OpenAI URL")
 }
+
 fn default_openai_model() -> String {
     "gpt-5.4-nano".into()
 }
@@ -161,7 +155,7 @@ impl Config {
 
     #[expect(clippy::needless_pass_by_value)]
     pub fn from_figment(figment: Figment) -> Result<Self, ConfigError> {
-        let cfg: Config = figment.extract()?;
+        let cfg: Config = figment.extract().map_err(Box::new)?;
         cfg.validate()?;
         Ok(cfg)
     }
